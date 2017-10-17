@@ -24,11 +24,11 @@ TMPDIR = './tmp'
 LOGDIR = './log'
 
 TRAIN_DATA = 'train_data.txt'
-VAL_DATA = 'test_eval.txt'  # 'val_data.txt'
+VAL_DATA = 'val_data.txt'
 
-DISPLAY_ITER = 1
+DISPLAY_ITER = 10
 SAVE_ITER = 1000
-VAL_ITER = 3
-THROUGHT_PUT_ITER = 1
+VAL_ITER = 1000
+THROUGH_PUT_ITER = 10
 
 SAVER_MAX_TO_KEEP = 10

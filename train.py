@@ -50,9 +50,9 @@ def restore():
 def tower_inference(rgb_inputs, flow_inputs, labels):
   rgb_logits, flow_logits = inference(rgb_inputs, flow_inputs)
   model_logits = rgb_logits + flow_logits
-  return tf.reduce_sum(
+  return tf.reduce_mean(
              tf.nn.sparse_softmax_cross_entropy_with_logits(
-                labels=labels, logits=model_logits)), model_logits
+                labels=labels, logits=model_logits)) 
 
 def average_gradients(tower_grads):
   average_grads = []
@@ -84,52 +84,25 @@ def get_true_counts(tower_logits_labels):
           
 
 if __name__ == '__main__':
-  train_pipeline = InputPipeLine(TRAIN_DATA)
-  val_pipeline = InputPipeLine(VAL_DATA)
-
-  is_training = tf.placeholder(tf.bool)
+  pipeline = InputPipeLine(TRAIN_DATA)
 
   opt = tf.train.GradientDescentOptimizer(LR)
 
   tower_grads = []
   tower_losses = []
-  tower_logits_labels = []
-
-  # prefetch train/val batch
-  train_prefetch_queue = tf.FIFOQueue(capacity=BATCH_SIZE,
-                                dtypes=[tf.float32, tf.float32, tf.int32], 
-                                shapes=[[NUM_FRAMES, CROP_SIZE, CROP_SIZE, 3],
-                                        [NUM_FRAMES, CROP_SIZE, CROP_SIZE, 2],
-                                        []])
-  val_prefetch_queue = tf.FIFOQueue(capacity=BATCH_SIZE,
-                              dtypes=[tf.float32, tf.float32, tf.int32], 
-                              shapes=[[NUM_FRAMES, CROP_SIZE, CROP_SIZE, 3],
-                                      [NUM_FRAMES, CROP_SIZE, CROP_SIZE, 2],
-                                      []])
-  train_batch = train_pipeline.get_batch(train=True)
-  val_batch = val_pipeline.get_batch(train=False)
-  train_enq = train_prefetch_queue.enqueue_many(train_batch)
-  tf.train.add_queue_runner(tf.train.QueueRunner(train_prefetch_queue, [train_enq]))
-  val_enq = val_prefetch_queue.enqueue_many(val_batch)
-  tf.train.add_queue_runner(tf.train.QueueRunner(val_prefetch_queue, [val_enq]))
   
   with tf.variable_scope(tf.get_variable_scope()):
     for i in range(NUM_GPUS):
       with tf.name_scope('tower_%d' % i):
-        rgbs, flows, labels = tf.cond(is_training, lambda: train_prefetch_queue.dequeue_up_to(BATCH_SIZE), lambda: val_prefetch_queue.dequeue_up_to(BATCH_SIZE))
-        rgbs = tf.reshape(rgbs, [-1, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 3])
-        flows = tf.reshape(flows, [-1, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 2])
+        rgbs, flows, labels = pipeline.get_batch() 
         with tf.device('/gpu:%d' % i):
-          loss, logits = tower_inference(rgbs, flows, labels)
+          loss = tower_inference(rgbs, flows, labels)
           tf.get_variable_scope().reuse_variables()
           grads = opt.compute_gradients(loss)
           tower_grads.append(grads)
           tower_losses.append(loss)
-          tower_logits_labels.append((logits, labels))
   
-  true_count_op = get_true_counts(tower_logits_labels)
-  total_loss = tf.reduce_sum(tower_losses)
-  avg_loss = total_loss / (NUM_GPUS * BATCH_SIZE)
+  avg_loss = tf.reduce_mean(tower_losses)
   grads = average_gradients(tower_grads)
   train_op = opt.apply_gradients(grads)
   rgb_saver, flow_saver = restore()
@@ -157,11 +130,11 @@ if __name__ == '__main__':
 
     coord = tf.train.Coordinator()
 
-    train_threads = train_pipeline.start(sess, coord)
-    val_threads = val_pipeline.start(sess, coord)
-    prefetch_threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+    threads = pipeline.start(sess, coord)
 
     summary_writer = tf.summary.FileWriter(LOGDIR, sess.graph)
+
+    tf.logging.set_verbosity(tf.logging.INFO)
 
     try:
       it = 0
@@ -169,46 +142,39 @@ if __name__ == '__main__':
       last_step = 0
       while it < MAX_ITER and not coord.should_stop():
         if it % DISPLAY_ITER == 0:
-          _, loss_val = sess.run([train_op, avg_loss], {is_training: True})
+          _, loss_val = sess.run([train_op, avg_loss]) 
           tf.logging.info('step %d, loss = %.3f', it, loss_val)
           loss_summ = tf.Summary(value=[
             tf.Summary.Value(tag="train_loss", simple_value=loss_val)
           ])
           summary_writer.add_summary(loss_summ, it)
 
-        if it % SAVE_ITER == 0:
+        if it % SAVE_ITER == 0 and it > 0:
           saver.save(sess, os.path.join(ckpt_path, 'model_ckpt'), it)
 
-        if it % VAL_ITER == 0:
+        if it % VAL_ITER == 0 and it > 0:
           tf.logging.info('validating...')
-          true_count = 0
-          val_loss = 0
-          for i in range(0, len(val_pipeline.videos), NUM_GPUS * BATCH_SIZE):
-            c, l = sess.run([true_count_op, total_loss], {is_training: False})
-            true_count += c
-            val_loss += l
           # add val accuracy to summary
-          acc = true_count / len(val_pipeline.videos)
+          acc, val_loss = evaluate(VAL_DATA, ckpt_path) 
           tf.logging.info('val accuracy: %.3f', acc)
           acc_summ = tf.Summary(value=[
             tf.Summary.Value(tag="val_acc", simple_value=acc)
           ])
           summary_writer.add_summary(acc_summ, it)
           # add val loss to summary
-          val_loss = val_loss / len(val_pipeline.videos)
           tf.logging.info('val loss: %.3f', val_loss)
           val_loss_summ = tf.Summary(value=[
             tf.Summary.Value(tag="val_loss", simple_value=val_loss)
           ])
           summary_writer.add_summary(val_loss_summ, it)
 
-        if it % THROUGH_PUT_ITER == 0:
+        if it % THROUGH_PUT_ITER == 0 and it > 0:
           duration = time.time() - last_time
           last_time = time.time()
           steps = it - last_step
           last_step = it
-          through_put = int(steps * NUM_GPUS * BAT / duration)
-          tf.logging.info('num examples/sec: %d', through_put)
+          through_put = steps * NUM_GPUS * BATCH_SIZE / duration
+          tf.logging.info('num examples/sec: %.3f', through_put)
           through_put_summ = tf.Summary(value=[
             tf.Summary.Value(tag="through_put", simple_value=through_put)
           ])
@@ -222,7 +188,6 @@ if __name__ == '__main__':
     summary_writer.close()
     
     coord.request_stop()
-    threads = [train_threads, val_threads, prefetch_threads]
-    coord.join([t for tg in threads for t in tg])
+    coord.join(threads)
 
 

@@ -28,6 +28,9 @@ def evaluate(input_file, ckpt_dir):
     rgbs, flows, labels = pipeline.get_batch(train=False)
     rgb_logits, flow_logits = inference(rgbs, flows)
     model_logits = rgb_logits + flow_logits
+    batch_loss = tf.reduce_sum(
+                   tf.nn.sparse_softmax_cross_entropy_with_logits(
+                     labels=labels,logits=model_logits))
     top_k_op = tf.nn.in_top_k(model_logits, labels, 1)
     
     saver = tf.train.Saver()
@@ -42,20 +45,26 @@ def evaluate(input_file, ckpt_dir):
         print 'error restoring ckpt...'
         return
       
-      coord, threads = pipeline.start(sess)
+      coord = tf.train.Coordinator()
+      threads = pipeline.start(sess, coord)
       
       true_count = 0
+      accum_loss = 0
       try:
         i = 0 
         while not coord.should_stop():
-          true_count += np.sum(sess.run(top_k_op))
+          cnt, loss = sess.run([top_k_op, batch_loss])
+          true_count += np.sum(cnt)
+          accum_loss += loss
       except tf.errors.OutOfRangeError as e:
         coord.request_stop(e)
 
       coord.request_stop()
       coord.join(threads)
 
-      print 'eval accuracy: %.3f' % (true_count / len(pipeline.videos))
+      acc = true_count / len(pipeline.videos)
+      avg_loss = accum_loss / len(pipeline.videos)
+      return acc, avg_loss
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
