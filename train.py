@@ -6,8 +6,7 @@ import numpy as np
 import tensorflow as tf
 import time
 
-from inputs_new import *
-from evaluate import evaluate
+from inputs import *
 
 import i3d
 from config import *
@@ -46,7 +45,7 @@ def restore():
   flow_saver = tf.train.Saver(var_list=flow_variable_map, reshape=True)
   return rgb_saver, flow_saver
 
-
+# The following multigpu train code edited from https://github.com/tensorflow/models/blob/master/tutorials/image/cifar10/cifar10_multi_gpu_train.py
 def tower_inference(rgb_inputs, flow_inputs, labels):
   rgb_logits, flow_logits = inference(rgb_inputs, flow_inputs)
   model_logits = rgb_logits + flow_logits
@@ -84,6 +83,8 @@ def get_true_counts(tower_logits_labels):
           
 
 if __name__ == '__main__':
+  
+  # See inputs.py for more info on InputPipeLine
   train_pipeline = InputPipeLine(TRAIN_DATA)
   val_pipeline = InputPipeLine(VAL_DATA)
 
@@ -98,30 +99,10 @@ if __name__ == '__main__':
   train_prefetch_queue = train_pipeline.prefetch_queue()
   val_prefetch_queue = val_pipeline.prefetch_queue()
 
-  # prefetch train/val batch
-  # train_prefetch_queue = tf.PaddingFIFOQueue(capacity=2,
-  #                               dtypes=[tf.float32, tf.float32, tf.int32], 
-  #                               shapes=[[None, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 3],
-  #                                       [None, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 2],
-  #                                       [None]])
-  # val_prefetch_queue = tf.PaddingFIFOQueue(capacity=2,
-  #                             dtypes=[tf.float32, tf.float32, tf.int32], 
-  #                             shapes=[[None, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 3],
-  #                                     [None, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 2],
-  #                                     [None]])
-  # train_batch = train_pipeline.get_batch(train=True)
-  # val_batch = val_pipeline.get_batch(train=False)
-  # train_enq = train_prefetch_queue.enqueue(train_batch)
-  # tf.train.add_queue_runner(tf.train.QueueRunner(train_prefetch_queue, [train_enq]))
-  # val_enq = val_prefetch_queue.enqueue(val_batch)
-  # tf.train.add_queue_runner(tf.train.QueueRunner(val_prefetch_queue, [val_enq]))
-  
   with tf.variable_scope(tf.get_variable_scope()):
     for i in range(NUM_GPUS):
       with tf.name_scope('tower_%d' % i):
         rgbs, flows, labels = tf.cond(is_training, lambda: train_prefetch_queue.dequeue(), lambda: val_prefetch_queue.dequeue())
-       # rgbs = tf.reshape(rgbs, [-1, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 3])
-       # flows = tf.reshape(flows, [-1, NUM_FRAMES, CROP_SIZE, CROP_SIZE, 2])
         with tf.device('/gpu:%d' % i):
           loss, logits = tower_inference(rgbs, flows, labels)
           tf.get_variable_scope().reuse_variables()
@@ -136,7 +117,7 @@ if __name__ == '__main__':
   train_op = opt.apply_gradients(grads)
   rgb_saver, flow_saver = restore()
 
-  # saver for fine tuning
+  # saver for our fine tuning
   if not os.path.exists(TMPDIR):
     os.mkdir(TMPDIR)
   saver = tf.train.Saver(max_to_keep=SAVER_MAX_TO_KEEP)
@@ -144,8 +125,11 @@ if __name__ == '__main__':
   if not os.path.exists(ckpt_path):
     os.mkdir(ckpt_path)
 
+
   with tf.Session(config=tf.ConfigProto(allow_soft_placement=False, log_device_placement=False)) as sess:
     sess.run(tf.global_variables_initializer())
+    
+    tf.logging.set_verbosity(tf.logging.INFO) 
 
     ckpt = tf.train.get_checkpoint_state(ckpt_path)
     if ckpt and ckpt.model_checkpoint_path:
@@ -161,10 +145,8 @@ if __name__ == '__main__':
 
     train_threads = train_pipeline.start(sess, coord)
     val_threads = val_pipeline.start(sess, coord)
-    # prefetch_threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
     summary_writer = tf.summary.FileWriter(LOGDIR, sess.graph)
-    tf.logging.set_verbosity(tf.logging.INFO) 
    
     try:
       it = 0

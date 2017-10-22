@@ -4,6 +4,11 @@ import os
 import threading
 from config import *
 
+"""
+The input pipeline combines feed_dict and queues
+enqueue using feed_dict inspired by http://ischlag.github.io/2016/11/07/tensorflow-input-pipeline-for-large-datasets/
+"""
+
 class InputPipeLine(object):
   def __init__(self, input_file_name, num_epochs=None):
     """
@@ -84,7 +89,6 @@ class InputPipeLine(object):
     enqueue_thread = threading.Thread(target=self._enqueue, args=[sess, enqueue_op])
     enqueue_thread.daemon = True
     enqueue_thread.start()
-    # start pipeline before start tf queue runners
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
     return threads
 
@@ -123,7 +127,6 @@ class InputPipeLine(object):
       beginH = (tf.shape(rgb_flow_concat)[1] - 224) / 2
       beginW = (tf.shape(rgb_flow_concat)[2] - 224) / 2
       crop_concat = tf.slice(rgb_flow_concat, [0, beginH, beginW, 0], [-1, CROP_SIZE, CROP_SIZE, -1])
-      # crop_concat = rgb_flow_concat[:,beginH:beginH+224, beginW:beginW+224, :]
 
     output_rgb = crop_concat[:,:,:,:3]
     output_flow = crop_concat[:,:,:,3:]
@@ -149,17 +152,3 @@ class InputPipeLine(object):
     tf.train.add_queue_runner(tf.train.QueueRunner(queue, [enq]))
     return queue
 
-# if __name__ == '__main__':
-#   with tf.Graph().as_default() as g:
-#     pipeline = InputPipeLine(INPUT_FILE)
-#     rgbs, flows, labels = pipeline.get_batch()
-
-#     with tf.Session() as sess:
-#       coord, threads = pipeline.start(sess) # start input pipeline with sess
-
-#       rgbs_res, flows_res = sess.run([rgbs, flows])
-#       # print 'RGB', rgbs_res[0].min(), rgbs_res[0].max() 
-#       # print 'flow', flows_res[0].min(), flows_res[0].max()
-#       print rgbs_res.shape, flows_res.shape
-#       coord.request_stop()
-#       coord.join(threads)
