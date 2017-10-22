@@ -81,7 +81,6 @@ def get_true_counts(tower_logits_labels):
                    )
                  )
   return true_count
-          
 
 if __name__ == '__main__':
   train_pipeline = InputPipeLine(TRAIN_DATA)
@@ -115,7 +114,7 @@ if __name__ == '__main__':
   # tf.train.add_queue_runner(tf.train.QueueRunner(train_prefetch_queue, [train_enq]))
   # val_enq = val_prefetch_queue.enqueue(val_batch)
   # tf.train.add_queue_runner(tf.train.QueueRunner(val_prefetch_queue, [val_enq]))
-  
+
   with tf.variable_scope(tf.get_variable_scope()):
     for i in range(NUM_GPUS):
       with tf.name_scope('tower_%d' % i):
@@ -129,7 +128,7 @@ if __name__ == '__main__':
           tower_grads.append(grads)
           tower_losses.append(loss)
           tower_logits_labels.append((logits, labels))
-  
+
   true_count_op = get_true_counts(tower_logits_labels)
   avg_loss = tf.reduce_mean(tower_losses)
   grads = average_gradients(tower_grads)
@@ -164,8 +163,8 @@ if __name__ == '__main__':
     # prefetch_threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
     summary_writer = tf.summary.FileWriter(LOGDIR, sess.graph)
-    tf.logging.set_verbosity(tf.logging.INFO) 
-   
+    tf.logging.set_verbosity(tf.logging.INFO)
+
     try:
       it = 0
       last_time = time.time()
@@ -201,7 +200,7 @@ if __name__ == '__main__':
           ])
           summary_writer.add_summary(acc_summ, it)
           # add val loss to summary
-          val_loss = np.mean(val_loss)
+          val_loss = val_loss / int(len(val_pipeline.videos) / NUM_GPUS / BATCH_SIZE)
           tf.logging.info('val loss: %.3f', val_loss)
           val_loss_summ = tf.Summary(value=[
             tf.Summary.Value(tag="val_loss", simple_value=val_loss)
@@ -213,12 +212,12 @@ if __name__ == '__main__':
           duration = time.time() - last_time - val_time
           steps = it - last_step
           through_put = steps * NUM_GPUS * BATCH_SIZE / duration
-          tf.logging.info('num examples/sec: %d', through_put)
+          tf.logging.info('num examples/sec: %.2f', through_put)
           through_put_summ = tf.Summary(value=[
             tf.Summary.Value(tag="through_put", simple_value=through_put)
           ])
           summary_writer.add_summary(through_put_summ, it)
-          last_time = time.time()          
+          last_time = time.time()
           last_step = it
           val_time = 0
 
@@ -228,9 +227,7 @@ if __name__ == '__main__':
       coord.request_stop(e)
 
     summary_writer.close()
-    
+
     coord.request_stop()
     threads = [train_threads, val_threads]
     coord.join([t for tgrp in threads for t in tgrp])
-
-
