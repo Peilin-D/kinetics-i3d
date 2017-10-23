@@ -68,7 +68,7 @@ def evaluate(input_file, ckpt_dir, top_k=None):
               for i in range(indices.shape[0]):
                 f.write('true class: ' + cls_dict[cls_labels[i]] + '\n')
                 for j in range(min(top_k, indices.shape[1])):
-                  f.write(cls_dict[indices[i, j]] + '\t' + probs[i, j] + '\n')
+                  f.write(cls_dict[indices[i, j]] + '\t' + probs[i, indices[i, j]] + '\n')
                 f.write('\n\n')
         else:
           true_count = 0

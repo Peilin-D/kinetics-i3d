@@ -8,3 +8,4 @@ data/
 *.ipynb
 *.bin
 tmp/
+log/
