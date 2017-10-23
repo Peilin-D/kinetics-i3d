@@ -60,7 +60,7 @@ def evaluate(input_file, ckpt_dir, top_k=None):
       threads = pipeline.start(sess, coord)
 
       try:
-        if top_k:
+        if top_k is not None:
           with open('out_prob.txt', 'w+') as f:
             while not coord.should_stop():
               probs, cls_labels = sess.run([prob_op, labels])
