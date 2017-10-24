@@ -66,9 +66,10 @@ def evaluate(input_file, ckpt_dir, top_k=None):
               probs, cls_labels = sess.run([prob_op, labels])
               indices = np.argsort(-probs, axis=1) # descending
               for i in range(indices.shape[0]):
-                f.write('true class: ' + cls_dict[cls_labels[i]] + '\n')
+                f.write('true class: %s\n' % cls_dict[cls_labels[i]])
+                print top_k < indices.shape[1]
                 for j in range(min(top_k, indices.shape[1])):
-                  f.write(cls_dict[indices[i, j]] + '\t' + probs[i, indices[i, j]] + '\n')
+                  f.write("%s\t%.6f\n" % (cls_dict[indices[i, j]], probs[i, indices[i, j]]))
                 f.write('\n\n')
         else:
           true_count = 0
@@ -79,13 +80,14 @@ def evaluate(input_file, ckpt_dir, top_k=None):
 
       coord.request_stop()
       coord.join(threads)
-
-      print 'eval accuracy: %.3f' % (true_count / len(pipeline.videos))
+      
+      if top_k is None:
+        print 'eval accuracy: %.3f' % (true_count / len(pipeline.videos))
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
   parser.add_argument('input_file')
   parser.add_argument('--ckpt_dir', required=True)
-  parser.add_argument('--top_k')
+  parser.add_argument('--top_k', type=int)
   args = parser.parse_args()
   evaluate(args.input_file, args.ckpt_dir, args.top_k)
