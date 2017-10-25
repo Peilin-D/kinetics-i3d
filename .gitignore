@@ -1,2 +1,11 @@
 *.pyc
+*.swp
 .DS_Store
+data/
+*.tfrecords
+*.npy
+.ipynb_checkpoints/
+*.ipynb
+*.bin
+tmp/
+log/
